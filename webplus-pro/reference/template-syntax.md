@@ -91,6 +91,27 @@
    表现成「暂无数据」。**发布 ≥2 篇即可恢复列表**；单页栏目（简介/联系我们）本就是单篇，属预期。
    判断方法：`curl /{vd}/{urlName}/list.psp | grep -c 'class="news-row"'`。
 
+## 5.5 面包屑 / 侧栏的两个常见坑
+
+1. **`{当前位置}` 自带「首页」**：渲染结果是 `<a>首页</a><span class='possplit'>…</span><a>栏目</a>…`。
+   模板若在它前面再写一个「首页」链接 → 出现「首页 / 首页 中心新闻」。
+   修法：加一段 JS 去掉 `{当前位置}` 容器里第一个 `<a>` 与第一个 `.possplit`：
+   ```js
+   document.querySelectorAll('[frag="窗口05"] span,[frag="窗口10"] span').forEach(function(span){
+     if (!span.querySelector('.possplit')) return;
+     var a = span.querySelector('a'), s = span.querySelector('.possplit');
+     if (a) a.remove(); if (s) s.remove();
+   });
+   ```
+2. **`simpleColumnPath` 可能不渲染**（输出空 div）。改用 `simpleColumnAttri` + `{当前位置}` 即可，
+   再配合上面的去重脚本。
+3. **叶子栏目（如「联系我们」）的侧栏会渲染成一个空的「栏目导航」卡片**。
+   修法：检测 `[frag="窗口06"]` 内没有 `a[href]` 时隐藏整个 `aside`，主内容区自动占满：
+   ```js
+   var box = document.querySelector('[frag="窗口06"]');
+   if (box && !box.querySelector('a[href]')) { var a = box.closest('aside'); if (a) a.style.display='none'; }
+   ```
+
 ## 6. 前端兜底渲染（当 portlet 绑定不可用时）
 
 ```html
