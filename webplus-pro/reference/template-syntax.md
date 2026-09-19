@@ -86,6 +86,10 @@
    URL 前缀优先用相对路径（`tzgg/list.psp`）。
 6. **响应式 display 工具类缺失会「藏内容」**：`<aside class="hidden md:block">` 若
    `.md:block` 缺失，内容永远不显示。补齐 `@media (min-width:768px){.md\:block{display:block}}`。
+7. **栏目已发布文章只有 1 篇时，列表页会渲染成单篇正文**（输出 `wp_single wp_column_article`
+   而不是 `InfoCycle` 列表）。此时前端按列表解析（如找 `.news-row`）会拿不到数据 →
+   表现成「暂无数据」。**发布 ≥2 篇即可恢复列表**；单页栏目（简介/联系我们）本就是单篇，属预期。
+   判断方法：`curl /{vd}/{urlName}/list.psp | grep -c 'class="news-row"'`。
 
 ## 6. 前端兜底渲染（当 portlet 绑定不可用时）
 
