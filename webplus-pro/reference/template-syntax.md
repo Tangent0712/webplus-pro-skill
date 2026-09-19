@@ -110,6 +110,37 @@
 - 抽正文/首图：`fetch(文章URL)` → `.wp_articlecontent`（`innerText` 做简介，`img.src` 做缩略图），失败给 `onerror` 占位图。
 - 占位图可用 Base64 内联，避免服务器静态资源损坏；**校验 base64 能正确解码**（曾有空格被转成 `!` 导致图标消失）。
 
+## 6.5 分页组件美化（`#wp_paging_wNN`）
+
+WebPlus 的 `simpleList` 分页由系统注入，默认样式（`/_js/_portletPlugs/simpleNews/css/simplenews.css`）
+只有 `float:right` + 行内排列，紧贴列表且很丑。分页 DOM 结构：
+
+```html
+<div id="wp_paging_wNN">
+  <ul class="wp_paging clearfix">
+    <li class="pages_count">每页 <em class="per_count">14</em> 记录 总共 <em class="all_count">6</em> 记录</li>
+    <li class="page_nav">
+      <a class="first"><span>第一页</span></a>
+      <a class="prev"><span>&lt;&lt;上一页</span></a>
+      <a class="next"><span>下一页&gt;&gt;</span></a>
+      <a class="last"><span>尾页</span></a>
+    </li>
+    <li class="page_jump">页码 <em class="curr_page">1</em>/<em class="all_pages">1</em>
+      <input class="pageNum"><a class="pagingJump">跳转到 </a></li>
+  </ul>
+</div>
+```
+
+美化要点（用 `#wp_paging_wNN` 提权 + `!important` 覆盖系统样式）：
+- `#wp_paging_wNN { margin-top:28px; padding-top:22px; border-top:1px dashed #d8dbe6; clear:both; }` —— 解决「贴住列表」。
+- `.wp_paging { float:none!important; display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px 18px; }`
+  并重置 `li/span/a { float:none!important; height:auto; margin-left:0; }`。
+- 按钮做成胶囊：`border-radius:9999px; height:34px; padding:0 14px; border:1px solid #dcdfe8; background:#fff;`，
+  hover 用主题色；当前页/跳转按钮用主色实底。
+- **只有 1 页时** prev/next 点了没反应 → 加一段小 JS 判断 `em.all_pages` 文本为 `1` 时给
+  `.page_nav` / `.page_jump` 加 `.is-disabled`（`pointer-events:none; opacity:.55`），避免"假按钮"。
+- 数字页码类名按 `.page_num a` / `a.page_num` / `.current` 兜底写样式（多页时系统才输出）。
+
 ## 7. 搜索组件定制（`portletmode="search"`）
 
 WebPlus 输出的是 `<table>` + `input[type=submit]`，样式老、兼容差。可靠做法：
