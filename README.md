@@ -76,7 +76,8 @@ webplus-pro/
 ├── SKILL.md                     # 主流程：铁律 / 侦察 / 生产链路 / 交付 / SOP
 ├── reference/
 │   ├── api.md                   # 后台 API 清单 + 返回码经验
-│   └── template-syntax.md       # 模板标记 / 字段 / portletmode / 兜底渲染
+│   ├── template-syntax.md       # 模板标记 / 字段 / portletmode / 兜底渲染
+│   └── pitfalls.md              # 易错点 + 可照抄配方（搜索框/分页/导航高亮/面包屑/兜底渲染）
 └── scripts/
     └── wp.mjs                   # CLI 工具
 ```
