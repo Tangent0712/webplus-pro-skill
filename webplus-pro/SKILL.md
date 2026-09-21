@@ -59,6 +59,11 @@ const page = browser.contexts()[0].pages().find(p => p.url().includes('admin.nju
 
 - **首选在已登录页面里 `page.evaluate(fetch(...))` 调后台 API**（`credentials:'include'`），
   比 `page.goto` 稳得多，也不刷屏。`new_page().goto()` 偶尔 `ERR_CONNECTION_CLOSED`。
+- **多站点账号进错站时**：后台「站点管理」下拉里没有目标站是常见的。
+  直接改地址栏 `_p` 即可强制进入：`as=<siteId>&p=1&m=N&` → base64url，
+  例 `as=444` → `YXM9NDQ0JnA9MSZtPU4m`，访问 `…/index.jsp?_p=YXM9NDQ0JnA9MSZtPU4m`。
+- **API 调用页要独立**：用 `context.newPage()` 并先 `goto` 一个同源页面，
+  避免复用用户正在操作的标签页（用户导航会让 `evaluate` 报 context destroyed）。
 - 调试脚本放临时目录，不要把 `_p`、cookie、账号写进仓库。
 - 结束前关掉多余标签页，只留核心后台页（吃内存）。
 
@@ -139,13 +144,19 @@ node scripts/wp.mjs bind <columnId> <bindingType 1|2|3> <pageId> <pageType 1|2|3
 绑到站点根栏目后子栏目自动继承。
 
 ### 3.4 建栏目 / 录文章
-- 建栏目：`POST /_web/_column/api/column/create.rst?parentId=<父栏目>&_p=`，
-  表单 `name`（必填）、`aliasName`（虚拟目录）、`navigationCK/navigation=true`、
-  `readOnly=false`、`synchronize=true`、`complex=false`、`defaultMain=true`、
-  `staticTypeId=0`、`selectColumn=0`、`act=add`、`id=0`。
-- 文章编辑器：`GET /_web/_cms/folder/api/articleEdit/new.rst?_p=&defColumnId=&siteFolderId=&flowDefId=0&act=add&artTypeId=1`；
-  「创建并发布」= `exportContent()` + 提交到 `createArticleAndPublishURL`；
-  发布状态用 `articles.rst` 校验（`state` 为「已发布」）。
+- 建栏目：`POST /_web/_column/api/column/create.rst?parentId=<父栏目>&_p=`。
+  **必须带全字段**（只发 name 会返回「操作出错，未明确错误原因」）：
+  `id=0&subColumnOrderId=10&act=add&name=…&aliasName=…&urlName=…&complex=false&readOnly=false`
+  `&staticTypeId=0&synchronize=true&defaultMain=true&diplayModel=0&showRule=0&thumbPicMode=0&picMode=0 …`
+  完整 body 与「隐藏栏目」写法见 `reference/api.md` §5.2（最稳是抓一次新增表单的真实提交照抄）。
+  新建栏目会自动获得**同名内容文件夹**。
+- 录文章（新增并发布）：`POST /_web/_cms/folder/api/publishArticle/create.rst?_p=&siteFolderId=&artTypeId=1`，
+  body 关键字段：`title`、`pageContent0`（★正文，不是 `content`）、`thumbImagePath`（封面）、
+  `publisher`、`newsDate`、`articleType=1`。正文图片引用 `/_temp/<file>`（`doUpload.jsp` 产物），
+  发布时系统自动搬到 `/_upload/article/images/...` 并改写 src（永久）。
+- 列出 / 删除文章：`articles.rst`（`rows[].id`=siteArticleId、`artId`=URL 里的文章 ID）；
+  删除 `POST articles.rst?…&_method=delete` body `selectedIds=<ids>`。
+  文章编辑器：`GET /_web/_cms/folder/api/articleEdit/new.rst?...&siteFolderId=&act=add&artTypeId=1`。
 - 栏目 ↔ 文件夹：栏目默认对应同名内容文件夹；也可把多个文件夹挂到同一栏目。
 
 ### 3.5 改模板页面（两条路）
@@ -187,6 +198,19 @@ node scripts/wp.mjs clear-cache --as=<siteId>
 - 列表不足时可在前端复制补齐，用于排版测试。
 - 布局技巧：循环只能输出同构 HTML 时，用 `:first-child` / `:not(:first-child)` 切换
   「大图卡 / 小列表」两种形态。
+
+**轮播图配方（Hero）**：不要用 `frag="窗口"` 做轮播。模板放静态骨架（**不放 `<img>`**，
+用渐变底色占位），前端 `fetch('<栏目 urlName>/list.psp')` 取文章 → 逐篇取
+`.wp_articlecontent` 首图 → 生成 slide + 圆点 → 图片 `load` 后淡入。
+配本地缓存：`localStorage`（元数据+TTL）+ `CacheStorage`（图片 blob），二次访问 0 请求。
+后台只需往该栏目发文章（标题=大字、正文首图=背景）。完整代码见 `reference/template-syntax.md` §6.6。
+
+**动图/正文图片永久化**：文章正文引用 `/_temp/<file>`（`doUpload.jsp` 的产物），
+**发布时系统会自动搬到 `/_upload/article/images/xx/xx/` 并改写 src** —— 无需自己处理图床。
+
+**设计器 vs 实时页**：可视化设计器按「`面板`=块」竖排渲染，且对畸形 HTML（多一个 `</div>`）
+容错比浏览器差。想让设计器里 header 是一行，就把「标题+导航+搜索」放进**同一个 `frag="面板01"`**
+并加 `class="flex justify-between items-center w-full"`。
 
 ## 5. 交付细节
 
@@ -233,6 +257,14 @@ repo/
 | 搜索框展开/收起跳动 | 纯 CSS 折叠 hack 脆弱 | JS 控制 `.expanded`，宽度过渡 + 失焦收起 + 拦截空提交 |
 | 子页面排版崩 | 正则改 HTML 破坏了 div 嵌套 | DOM 解析校验；精准整块替换 |
 | 文章页太现代、甲方不喜欢 | 双栏侧栏设计 | 改单栏居中阅读，参考校内常规新闻页 |
+| 内联 JS 整段失效、报 `Invalid regular expression flags` | 代码里出现字面量 `URL(`（`createObjectURL`/`readAsDataURL`），被系统当相对路径把参数重写坏 | 用 `window['URL']['createObjectURL'](blob)`；或 `var r=fr.readAsDataURL;r.call(fr,blob)` |
+| 设计器里顶部导航竖排/错位（实时页正常） | ①header 多了 `</div>` 提前闭合 `<nav>`；②标题/导航/搜索是三个独立 `面板`，设计器按块竖排 | 删多余 `</div>`；把「标题+导航+搜索」收进**同一个 `frag="面板01"`** 并加 `class="flex justify-between items-center w-full"` |
+| 文章页 `{文章内容}`/`{作者}` 原样输出 | 字段名错 | 用 `{内容}` `{发布者}` `{动态浏览次数}` |
+| 首页兜底脚本「暂无数据」 | 列表页缺 `.news-row/.t/.d` class | 在 listcolumn 列表项补回这三个 class |
+| 轮播图加载时破图/白屏 | 骨架 `<img src="images/hero-1.jpg">` 指向模板里不存在的文件（404） | 骨架不放 `<img>`，用渐变底色占位 + 真图 `load` 后淡入 |
+| 轮播每次刷新都重新拉数据/图 | `list.psp`/文章页无缓存头，图片只给 ETag 仍回 200 | 前端 `localStorage`（元数据+TTL）+ `CacheStorage`（图片 bytes）做本地缓存 |
+| 建栏目接口报「操作出错，未明确错误原因」 | 字段缺失（只发 name 不够） | 照抄 `column/new.rst` 表单完整 body（见 `reference/api.md` §5.2） |
+| 删除文章不生效、返回 `{"icon":"warning"}` | 参数名错 | `POST articles.rst?…&_method=delete`，body `selectedIds=<ids>` |
 
 ## 7. 修改流程 SOP（每轮都照做）
 

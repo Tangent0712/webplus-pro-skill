@@ -303,3 +303,17 @@ document.querySelectorAll('[frag="窗口04"] span, [frag="窗口05"] span, [frag
 | 设计器保存窗口结构报 `backendParams` 异常 | 缺设计器内部参数 | 改用经典 `page/0.rst` PUT 整页保存 |
 | 内容块绑定成功但前台仍 `null` | 设计器草稿与经典引擎不同步 | 走 §四 4.3 前端兜底，或核对 `contentBlockConfigs` 实际记录 |
 | 对外域名未更新 | 需要超管发布 | 子站点后台无「站点发布」菜单，找超管；前台 `main.psp` 是实时的，不用等发布 |
+
+---
+
+## 七、前台 JS / 资源路径被系统重写（很隐蔽）
+
+| 症状 | 根因 | 处理 |
+|---|---|---|
+| 内联 `<script>` 报 `Invalid regular expression flags` | 代码里出现字面量 `URL(`（如 `URL.createObjectURL(blob)`、`FileReader.readAsDataURL(blob)`），WebPlus 把括号里的参数当成**相对路径**，重写成 `/_upload/tpl/.../blob` | 避免任何 `URL(` 字面量：用 `window['URL']['createObjectURL'](blob)`；或 `var read = fr.readAsDataURL; read.call(fr, blob)` |
+| 图片/接口 404，路径被加了 `/_upload/tpl/...` 前缀 | `src` / CSS `url()` / JS 里的资源路径被相对化重写 | 资源用绝对路径（`/...`），别用会被误判成路径的裸标识符 |
+| 刷新后破图一闪 | 骨架 `<img src="images/xxx">` 指向模板目录里不存在的文件（新图没随模板导入） | 骨架不放 `<img>`，用渐变/底色占位；真实图加载后淡入（`.hero-img.hero-ready`） |
+| 轮播每次刷新都重新拉数据/图片 | `list.psp`、文章页无缓存头，图片只给 ETag 但仍回 200 | 前端 `localStorage`（元数据 + TTL）+ `CacheStorage`（图片 bytes）本地缓存，二次访问 0 请求 |
+| 正文图片 `/_temp/<file>` 会不会被清 | `doUpload.jsp` 只进临时区 | 文章 `pageContent0` 里引用 `/_temp/<file>`，**发布时系统会自动搬到** `/_upload/article/images/xx/xx/` 并改写 src（永久可用） |
+| 设计器里顶部导航竖排/错位，实时页却正常 | 模板 header 多了 `</div>` 提前闭合 `<nav>`；且标题/导航/搜索是三个独立 `面板`，设计器按块竖排 | 删掉多余的 `</div>`；把「标题 + 导航链接 + 搜索窗口」塞进**同一个 `frag="面板01"`** 并给它 `class="flex justify-between items-center w-full"`，设计器才按一行渲染 |
+| 浏览器 URL 里写死站点 ID（如 `_p=YXM9OTMmdD05NDUmcD0xJm09TiY_`）导致进错站 | `_p` 是 `as=<siteId>&p=1&m=N&` 的 base64url | 现算：`as=444` → `YXM9NDQ0JnA9MSZtPU4m`，直接改地址栏进入目标站点后台 |

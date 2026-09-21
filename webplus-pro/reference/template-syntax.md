@@ -90,6 +90,11 @@
    而不是 `InfoCycle` 列表）。此时前端按列表解析（如找 `.news-row`）会拿不到数据 →
    表现成「暂无数据」。**发布 ≥2 篇即可恢复列表**；单页栏目（简介/联系我们）本就是单篇，属预期。
    判断方法：`curl /{vd}/{urlName}/list.psp | grep -c 'class="news-row"'`。
+8. **内联 JS 里不能出现字面量 `URL(`**：`URL.createObjectURL(blob)`、
+   `FileReader.readAsDataURL(blob)` 都会被 WebPlus 当成 CSS/属性里的相对路径，
+   把括号里的参数重写成 `/_upload/tpl/.../blob`，脚本直接报 `Invalid regular expression flags` 整段失效。
+   规避：`window['URL']['createObjectURL'](blob)`，或 `var read = fr.readAsDataURL; read.call(fr, blob)`。
+   （同类：`<img src="images/x.jpg">` 若该图不存在于模板目录，会被重写成 404 路径。）
 
 ## 5.5 面包屑 / 侧栏的两个常见坑
 
@@ -161,6 +166,48 @@ WebPlus 的 `simpleList` 分页由系统注入，默认样式（`/_js/_portletPl
 - **只有 1 页时** prev/next 点了没反应 → 加一段小 JS 判断 `em.all_pages` 文本为 `1` 时给
   `.page_nav` / `.page_jump` 加 `.is-disabled`（`pointer-events:none; opacity:.55`），避免"假按钮"。
 - 数字页码类名按 `.page_num a` / `a.page_num` / `.current` 兜底写样式（多页时系统才输出）。
+
+## 6.6 轮播图（Hero）配方：静态骨架 + 前端兜底 + 本地缓存
+
+**不要**把轮播做成 `frag="窗口NN"`（未登记窗口会输出字面量 `null`；登记了也常无法控制排版）。
+推荐：模板里放**纯静态骨架**，由后台一个栏目驱动，前端 JS 拉取渲染。
+
+HTML 骨架（注意：**骨架不要放 `<img>`**，否则会引用模板目录里不存在的图 → 404 破图一闪）：
+
+```html
+<section id="hero-carousel" style="background:linear-gradient(135deg,#04267e,#001451)">
+  <style>#hero-slides .hero-img{opacity:0;transition:opacity .8s}#hero-slides .hero-img.hero-ready{opacity:1}</style>
+  <div id="hero-slides"></div>
+  <div id="hero-dots"></div>
+</section>
+```
+
+JS 要点：
+- `fetch('<轮播栏目 urlName>/list.psp')` → 解析 `.news-row` 拿标题 + 文章 URL；
+- 逐篇 `fetch(文章URL)` → 取 `.wp_articlecontent` 的**第一个 `<img>`** 当背景图；
+- 生成 slide + 圆点，首图单独 `z-10`，5s 轮播；图片 `load` 后加 `.hero-ready` 淡入。
+
+**本地缓存（重复刷新 0 请求）**：
+- 元数据：`localStorage['<key>'] = {ts, items:[{img,title,url}]}`，带 TTL（如 6h）；
+- 图片 bytes：`CacheStorage`（`caches.open(name)` + `cache.put/match`）存 blob；
+  取用时把 blob 转成可显示地址 —— **注意 §5.8 的 `URL(` 重写坑**。
+
+> 判定栏目里「最新文章」即最新轮播帧。后台发文即换图（标题=大字，正文首图=背景）。
+
+## 6.7 列表项 class 契约（前后端兜底靠它对齐）
+
+前端兜底脚本（首页资讯、轮播等）依赖列表页输出的固定 class：
+
+```html
+<!-- listcolumn 的 simpleList 循环里 -->
+<li class="news-row">
+  <span class="t">{标题}</span>
+  <span class="d">{发布时间}</span>
+</li>
+```
+- `.news-row` / `.t` / `.d` 是**前端解析契约**，改版时务必保留；
+- 若缺这些 class，首页兜底脚本会解析不到 → 显示「暂无数据」；
+- `{标题}` 自带 `<a>`，所以 `.t` 里**不要再包 `<a>`**（避免嵌套 `<a>` 塌陷）。
 
 ## 7. 搜索组件定制（`portletmode="search"`）
 

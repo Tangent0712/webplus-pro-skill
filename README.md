@@ -5,11 +5,20 @@
 适用于「不能改源码，只能做模板包 + 后台配置」的网站群场景，覆盖：
 
 - **完整生产链路**：侦察 → 模板包 → 导入模板 → 绑定页面 → 建栏目/文件夹 → 录文章 → 清缓存 → 验收 → 交付打包
-- **隐藏后台 API**：`savePage.rst` / `templateBinding` / `contentBlock` / `portletDoId` / 上传导入 / 缓存清理
+- **隐藏后台 API**：`savePage.rst` / `templateBinding` / `contentBlock` / `portletDoId` / 上传导入 / 缓存清理 /
+  建栏目 / 发布文章（`publishArticle` + `pageContent0`）/ 删除文章（`articles.rst?_method=delete`）
 - **模板语法契约**：`frag="面板/窗口/窗口内容"`、`portletmode`、`InfoCycle`、字段表、日期格式
-- **前端兜底渲染**：Portlet 绑定失效时用 JS 抓 `list.psp` 渲染动态列表
-- **踩坑速查**：字面量 `null`、窗口被后台登记覆盖、Tailwind 工具类缺失、`{标题}` 嵌套 `<a>`、搜索组件重构等
-- **CLI 工具**：`scripts/wp.mjs`（免登录侦察 / 拉取模板 / 导入 / 绑定 / 保存页面 / 清缓存）
+- **前端兜底渲染**：Portlet 绑定失效时用 JS 抓 `list.psp` 渲染动态列表；含**轮播图配方**（静态骨架 + 首图提取 + `localStorage`/`CacheStorage` 本地缓存）
+- **踩坑速查**：字面量 `null`、窗口被后台登记覆盖、Tailwind 工具类缺失、`{标题}` 嵌套 `<a>`、
+  WebPlus 重写 `URL(...)` 导致内联脚本报错、设计器 header 竖排、搜索组件重构等
+- **CLI 工具**：`scripts/wp.mjs`（侦察 / 拉取模板 / 导入 / 绑定 / 保存页面 / 建栏目 / 发布·删除文章 / 上传 / 清缓存）
+
+## 更新日志
+
+- **2026-09-21**：补齐「建栏目 / 发布文章 / 删除文章」的完整接口与参数（含 `pageContent0` 正文、
+  `/_temp` → `/_upload/article/images` 图片落盘时机）；新增轮播图配方与前端本地缓存方案；
+  记录 WebPlus 重写 `URL(` 的隐蔽坑与设计器 header 面板/多余 `</div>` 问题；
+  `wp.mjs` 新增 `columns / col-create / upload / article-create / article-delete` 命令。
 
 ## 安装
 
@@ -65,7 +74,18 @@ node webplus-pro/scripts/wp.mjs import ./template.zip "模板名" --as=<siteId>
 node webplus-pro/scripts/wp.mjs bind <columnId> <1|2|3> <pageId> <1|2|3> --as=<siteId>
 node webplus-pro/scripts/wp.mjs save-page <templateId> <pageId> ./main.htm --as=<siteId>
 node webplus-pro/scripts/wp.mjs clear-cache --as=<siteId>
+
+# 栏目 / 文章 / 上传
+node webplus-pro/scripts/wp.mjs columns <parentColumnId> --as=<siteId>
+node webplus-pro/scripts/wp.mjs col-create <parentColumnId> "栏目标题" <urlName> --hidden --as=<siteId>
+node webplus-pro/scripts/wp.mjs articles <siteFolderId> --as=<siteId>
+node webplus-pro/scripts/wp.mjs article-create <siteFolderId> "文章标题" --image=./hero.jpg --as=<siteId>
+node webplus-pro/scripts/wp.mjs article-delete <siteFolderId> <siteArticleId[,id2]> --as=<siteId>
+node webplus-pro/scripts/wp.mjs upload ./pic.jpg --as=<siteId>
 ```
+
+> 文章正文里的图片引用 `/_temp/<file>` 时，**发布时系统会自动搬到** `/_upload/article/images/...`
+> 并改写 `src` —— 无需自建图床。
 
 `--as` 可省略：脚本会从当前打开的后台页 `_p` 中自动解析站点 ID。
 

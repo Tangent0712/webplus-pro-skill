@@ -116,13 +116,85 @@ POST /_web/_portletconf/simplenew/api/simpleNew/create.rst?_p=<siteId>          
 
 ## 5. 栏目 / 文章
 
-```
-POST /_web/_column/api/column/create.rst?parentId=<父栏目>&_p=<siteId>
-     name=<名>&aliasName=<urlName>&navigationCK/navigation=true&readOnly=false
-     &synchronize=true&complex=false&defaultMain=true&staticTypeId=0&selectColumn=0&act=add&id=0
+### 5.1 栏目树 / 读取
 
-GET  /_web/_cms/folder/api/articleEdit/new.rst?_p=<siteId>&defColumnId=<cid>&siteFolderId=<fid>&flowDefId=0&act=add&artTypeId=1
-     表单 #articleFM；保存草稿 saveArticle()；创建并发布 exportContent()+createArticleAndPublishURL
+```
+GET /_web/_column/api/columns.rst?_p=<siteId>&columnId=<根栏目>&showType=0
+    → {rows:[{id, cid, name(HTML), urlName, opened, readOnly, complex, ...}]}（该父栏目的直接子栏目）
+GET /_web/_column/api/columns.rst?_p=<siteId>&showType=0            → rows:[]（必须带 columnId）
+GET /_web/_cms/folder/api/folder/tree.rst?_p=<siteId>&isNeedShowAllFolder=true
+    → [{id,text,children}]（内容文件夹；新建栏目会同步同名文件夹）
+```
+> `columns.rst` 的 `name` 是 HTML 片段（含 `<a href="/{vd}/{urlName}/list.psp">名称</a>`），
+> 真实子栏目 ID 取 `id`；文章 URL 里的 `c<ID>` 是**栏目 ID**。
+
+### 5.2 新建栏目（**必须带全字段**，否则返回「操作出错，未明确错误原因」）
+
+```
+POST /_web/_column/api/column/create.rst?parentId=<父栏目ID>&_p=<siteId>
+Content-Type: application/x-www-form-urlencoded
+
+id=0&syncFolderId=&subColumnOrderId=10&picDelete=false&iconPicDelete=false&act=add
+&name=<名>&aliasName=<简称>&markName=&complex=false
+&navigationCK=on&navigation=true            # 隐藏栏目：去掉 navigationCK，navigation=false
+&readOnly=false&staticTypeId=0&synchronizeCK=on&synchronize=true
+&link=&target=&urlName=<urlName>&subColumnOrder=10&iconPath=&picPath=
+&selectColumn=0&mainColumnId=0&defaultMainCK=on&defaultMain=true&putMainOfChildren=false
+&metaKeywords=&metaDescription=&summary=&diplayModel=0&showRule=0&rowCount=&colCount=
+&titleFormat=&titleLength=&timeFormat=&thumbPicMode=0&thumbPicWidth=&thumbPicHeight=
+&picMode=0&picWidth=&picHeight=
+    → "success"（失败为 JSON {msg:"操作出错，未明确错误原因",icon:"error"}）
+```
+> 只需「名称」即可创建；但 `subColumnOrderId`、`act=add`、`diplayModel`、`showRule` 等**缺一不可**。
+> 最稳的获取方式：打开「栏目管理 → 增加」页面，抓一次真实表单提交的 body 照抄（见 §9 逆向套路）。
+> 新建成功后栏目自动获得同名内容文件夹（`folder/tree.rst` 里可见），两者 ID 通常不同。
+
+### 5.3 删除栏目 / 移动排序
+
+```
+POST /_web/_column/api/columnMoveSort/create.rst?_p=<siteId>&showType=0&parentId=<父>&ids=…  # 拖拽排序
+（删除栏目走栏目管理页的删除按钮；一般直接删内容文件夹即可）
+```
+
+### 5.4 发布文章（新增 + 直接发布）
+
+```
+POST /_web/_cms/folder/api/publishArticle/create.rst?_p=<siteId>&siteFolderId=<fid>&artTypeId=1
+Content-Type: application/x-www-form-urlencoded
+
+siteFolderId=<fid>&title=<标题>&articleType=1&publisher=<作者>&newsDate=<yyyy-MM-dd>
+&pageNum=1&pageContent0=<正文 HTML>      # ★ 正文真实字段名是 pageContent0（不是 content）
+&thumbImagePath=<封面图文件名>           # ★ 封面/缩略图字段
+    → "success"
+```
+- **正文图片引用 `/_temp/<file>`**：发布时系统会把文件搬到
+  `/_upload/article/images/xx/xx/<file>` **并改写 src**（永久可用）。
+  参考完整 HTML：`<p><img src="/_temp/<file>" /></p>`。
+- 只存草稿/走流程：同目录下 `finalizeArticle/create.rst`（定稿）、`articleEdit/new.rst`（表单）。
+- 编辑器表单里正文 textarea 的 name 就是 `pageContent0`，
+  `saveArticle()` 内部先 `exportContent()` 把富文本写回该字段。
+
+### 5.5 列出 / 删除文章
+
+```
+POST /_web/_cms/folder/api/articles.rst?_p=<siteId>&hasOnlyDraft=false&siteFolderId=<fid>
+    → {total, rows:[{id, artId, articleTitle(HTML), state:"<font color='blue'>已发布</font>", ...}]}
+      id    = siteArticleId（删除/编辑用）
+      artId = 文章 ID（出现在前台 URL 的 c<栏目ID>a<artId>）
+
+POST /_web/_cms/folder/api/articles.rst?_p=<siteId>&_method=delete&siteFolderId=<fid>
+     body: selectedIds=<id1,id2,...>          # ★ 字段名是 selectedIds（用 ids 会返回 {"icon":"warning"} 且不生效）
+    → "success"
+```
+
+### 5.6 文章编辑表单（读字段名）
+
+```
+GET /_web/_cms/folder/api/articleEdit/new.rst?_p=<siteId>&defColumnId=<cid>&siteFolderId=<fid>&flowDefId=0&act=add&artTypeId=1
+    → 表单 #articleFM，含（部分）：
+      title / shortTitle / pageContent0 / thumbImagePath / thumbImagePath1 / linkUrl / summary
+      createArticleAndPublishURL  = ../publishArticle/create.rst?_p=…&siteFolderId=<fid>&artTypeId=1
+      createArticleAndFinalizeURL = ../finalizeArticle/create.rst?_p=…&siteFolderId=<fid>&artTypeId=1
 ```
 
 ## 6. 缓存 / 发布
@@ -151,3 +223,43 @@ POST /_web/_core/caches/api/userCaches.rst?_p=<siteId>&_method=delete&clearAll=1
 | `resultCode: '2' 页面类型为空！` | 接口需要 `pageType` |
 | `resultCode: '5' 缺少窗口Id` | 接口需要 `windowId` |
 | `resultCode: '21' 缺少id` | 需要 `id` 参数 |
+
+## 8. 设计器 / 组件 / 模板资源
+
+```
+GET  /_web/sopplus/portlet/api/getPages.rst?templateId=<tid>&_p=<siteId>
+     → {items:[{id,type,name,url}]}  → 可拿到首页/列表页/文章页/文件页的 pageId
+
+GET  /_web/sopplus/portlet/api/portlets.rst?pageType=1&templateId=<tid>&pageId=<pid>&_p=<siteId>
+     → 组件目录（74 个），按「常用/新闻/图片/栏目/组件/其他」分组：
+       {zjmc:"新闻列表", zjid:"ptDef36_simpleNews", confpage:"/_web/_portletconf/simplenew/api/simpleNew/new.rst?portletDoId=36&defModeName=SimpleNewsPortlet&_p=…"}
+       图片类含「多图交替1/2/…」「图片滚动」「sudyfocus1.4-带缩略图切换」等；
+       { pageType 缺省 → {"resultCode":"2","errorMsg":"页面类型为空！"} }
+
+GET  /_web/sopplus/portlet/api/modeTypes/new.rst?_p=<siteId>
+     → 模板「模式」列表（normal/simpleNews/nav/simpleSudyNavi/columnList/simpleList/simpleSiteAttri/…）
+       每项含 structureTags（InfoCycleBegin…）与 attrTags（{标题} {内容} …）
+
+GET  /_web/_tpl/sop.urls?_p=<siteId>          # 设计器整套 API 表
+```
+
+模板「资源文件」管理（**只能放 CSS/JS，不能放图片**；`images/` 为禁改目录）：
+
+```
+GET  /_web/_tpl/sopTplResFiles.jsp?templateId=<tid>&_p=<siteId>       # 资源文件管理页
+POST /doUpload.jsp?_p=<siteId>                                        # 先上传到 /_temp
+POST /_web/_tpl/api/file/create.rst?templateId=<tid>&_p=<siteId>      # type=2 本地上传，落地到模板目录
+```
+> 结论：模板里的 `images/` 无法通过后台接口增删；要换模板图片，
+> 要么走「重新导入模板 zip」，要么**改用文章正文图（`/_upload/article/...`）由前端引用**（推荐）。
+
+## 9. 逆向套路（接口/参数未知时）
+
+1. 打开对应「表单页 / 管理页 / 设计器」，用 Playwright `page.on('request')` 抓真实提交。
+   例：新建栏目的 body 就是从 `_web/_column/api/column/new.rst?…&act=add` 表单提交里抓到的。
+2. `page.on('pageerror')` 抓内联脚本语法错误（WebPlus 重写会制造 `Invalid regular expression flags`）。
+3. 表单字段名优先从前端 JS 找：正文=`pageContent0`、封面=`thumbImagePath`、
+   删除 `articles.rst` 用 `selectedIds`、搜索字段 `keyword`。
+4. 上传文件统一先 `POST /doUpload.jsp`（字段名 `qqfile`），
+   返回**非严格 JSON**：`{success:true,fileName:'<uuid>.<ext>',priviewUrl:'/_temp/<uuid>.<ext>'}`，
+   用正则 `/fileName\s*:\s*'([^']+)'/` 提取，别直接 `JSON.parse`。

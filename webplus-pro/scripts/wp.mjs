@@ -13,7 +13,12 @@
  *   node wp.mjs import <zipPath> <name> [--enabled=true] [--as=<siteId>]
  *   node wp.mjs bind <columnId> <bindingType 1|2|3> <pageId> <pageType 1|2|3> [--as=<siteId>]
  *   node wp.mjs bind-source <templateId> <pageId> <windowId w06> <columnId> [--as=<siteId>]
+ *   node wp.mjs columns <parentColumnId> [--as=<siteId>]           # 列出子栏目 {id,urlName,name}
+ *   node wp.mjs col-create <parentColumnId> <name> [urlName] [--hidden] [--as=<siteId>]
  *   node wp.mjs articles <siteFolderId> [--as=<siteId>]
+ *   node wp.mjs upload <file> [--as=<siteId>]                       # 传到 /_temp，返回 fileName
+ *   node wp.mjs article-create <siteFolderId> <title> [--body=<html>] [--image=<file>] [--as=<siteId>]
+ *   node wp.mjs article-delete <siteFolderId> <siteArticleId[,id2]> [--as=<siteId>]
  *   node wp.mjs clear-cache [--as=<siteId>]
  *
  * 全局参数：--as=<siteId>  --cdp=<http://127.0.0.1:9222>  --playwright=<playwright-core 包目录>
@@ -99,6 +104,31 @@ async function api(page, url, { method = 'GET', body } = {}) {
 }
 
 const out = (x) => console.log(typeof x === 'string' ? x : JSON.stringify(x, null, 2));
+
+const MIME = { '.zip': 'application/zip', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp' };
+const mimeOf = (f) => MIME[path.extname(f).toLowerCase()] || 'application/octet-stream';
+
+// 上传文件到 /_temp，返回 { fileName, raw }。响应不是严格 JSON，用正则提取。
+async function pageUpload(page, filePath) {
+  const b64 = fs.readFileSync(filePath).toString('base64');
+  const raw = await page.evaluate(
+    async ({ url, b64, fname, mime }) => {
+      const bin = atob(b64);
+      const arr = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+      const fd = new FormData();
+      fd.append('qqfile', new Blob([arr], { type: mime }), fname);
+      const res = await fetch(url, { method: 'POST', body: fd, credentials: 'include' });
+      return await res.text();
+    },
+    { url: `${BASE}/doUpload.jsp`, b64, fname: path.basename(filePath), mime: mimeOf(filePath) }
+  );
+  return { fileName: (raw.match(/fileName\s*:\s*'([^']+)'/) || [])[1], raw: String(raw).trim() };
+}
+
+// 列栏目里每个子栏目项的形状（name 是 HTML，取纯文本）
+const cleanCols = (rows) =>
+  (rows || []).map((x) => ({ id: x.id, urlName: x.urlName, name: String(x.name || '').replace(/<[^>]+>/g, '') }));
 
 async function main() {
   switch (cmd) {
@@ -255,7 +285,88 @@ async function main() {
           page,
           withToken(`/_web/_cms/folder/api/articles.rst?hasOnlyDraft=false&siteFolderId=${folderId}`)
         );
-        out(r?.result?.data?.items ?? r);
+        const rows = (r?.rows || r?.result?.data?.items || []).map((x) => ({
+          id: x.id,
+          artId: x.artId,
+          title: String(x.articleTitle || x.title || '').replace(/<[^>]+>/g, ''),
+          state: String(x.state || '').replace(/<[^>]+>/g, ''),
+        }));
+        out(rows);
+      });
+      break;
+    }
+
+    case 'columns': {
+      const parent = rest[0];
+      if (!parent) throw new Error('用法: columns <parentColumnId>');
+      await withPage(async (page) => {
+        const r = await api(page, withToken(`/_web/_column/api/columns.rst?columnId=${parent}&showType=0`));
+        out(cleanCols(r?.rows || r));
+      });
+      break;
+    }
+
+    case 'col-create': {
+      const [parentId, name, urlName] = rest;
+      if (!parentId || !name) throw new Error('用法: col-create <parentColumnId> <name> [urlName] [--hidden]');
+      const hidden = flags.hidden === 'true';
+      const body = {
+        id: '0', syncFolderId: '', subColumnOrderId: '10', picDelete: 'false', iconPicDelete: 'false', act: 'add',
+        name, aliasName: urlName || '', markName: '', complex: 'false',
+        // 隐藏栏目：不要 navigationCK，navigation=false
+        ...(hidden ? { navigation: 'false' } : { navigationCK: 'on', navigation: 'true' }),
+        readOnly: 'false', staticTypeId: '0', synchronizeCK: 'on', synchronize: 'true',
+        link: '', target: '', urlName: urlName || '', subColumnOrder: '10', iconPath: '', picPath: '',
+        selectColumn: '0', mainColumnId: '0', defaultMainCK: 'on', defaultMain: 'true', putMainOfChildren: 'false',
+        metaKeywords: '', metaDescription: '', summary: '', diplayModel: '0', showRule: '0',
+        rowCount: '', colCount: '', titleFormat: '', titleLength: '', timeFormat: '',
+        thumbPicMode: '0', thumbPicWidth: '', thumbPicHeight: '', picMode: '0', picWidth: '', picHeight: '',
+      };
+      await withPage(async (page) => {
+        out(await api(page, withToken(`/_web/_column/api/column/create.rst?parentId=${parentId}`), { method: 'POST', body }));
+      });
+      break;
+    }
+
+    case 'upload': {
+      const file = rest[0];
+      if (!file) throw new Error('用法: upload <file>');
+      await withPage(async (page) => {
+        const { fileName, raw } = await pageUpload(page, file);
+        out({ fileName: fileName || null, raw });
+        if (!fileName) process.exitCode = 1;
+      });
+      break;
+    }
+
+    case 'article-create': {
+      const [folderId, title] = rest;
+      if (!folderId || !title) throw new Error('用法: article-create <siteFolderId> <title> [--body=<html>] [--image=<file>] [--publisher=]');
+      await withPage(async (page) => {
+        let bodyHtml = flags.body || '';
+        let thumb = '';
+        if (flags.image) {
+          const up = await pageUpload(page, flags.image);
+          thumb = up.fileName || '';
+          if (!thumb) throw new Error('图片上传失败: ' + up.raw);
+          if (!bodyHtml) bodyHtml = `<p><img src="/_temp/${thumb}" /></p>`; // 发布时会被搬到 /_upload/article/images 并改写
+        }
+        const body = {
+          siteFolderId: folderId, title, pageNum: '1', pageContent0: bodyHtml,
+          articleType: '1', publisher: flags.publisher || '管理员',
+          newsDate: flags.date || new Date().toISOString().slice(0, 10),
+        };
+        if (thumb) { body.thumbImagePath = thumb; body.thumbImagePath1 = thumb; }
+        out(await api(page, withToken(`/_web/_cms/folder/api/publishArticle/create.rst?siteFolderId=${folderId}&artTypeId=1`), { method: 'POST', body }));
+      });
+      break;
+    }
+
+    case 'article-delete': {
+      const [folderId, ids] = rest;
+      if (!folderId || !ids) throw new Error('用法: article-delete <siteFolderId> <siteArticleId[,id2]>');
+      await withPage(async (page) => {
+        out(await api(page, withToken(`/_web/_cms/folder/api/articles.rst?_method=delete&siteFolderId=${folderId}`), { method: 'POST', body: { selectedIds: ids } }));
       });
       break;
     }
